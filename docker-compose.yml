@@ -1,46 +1,68 @@
-version: "3.2"
+version: "3"
+  
+networks:
+  myNetwork:
+    driver: bridge
 
-# list of containers to be run
 services:
 
-  # rabbit_mq container uses the default rabbitmq image
-  # exposes the ports
-  # uses the specified volume
-  rabbit_mq:
-
-    # plugin for web dashboard
-    image: rabbitmq:3.8-rc-management
-    container_name: rabbit_mq
+  zookeeper:
+    image: 'bitnami/zookeeper:latest'
     ports:
-        - '5672:5672'
-        - '15672:15672'
-    volumes:
-      - rabbit_mqdata:/usr/share/rabbitmq/data
+      - '2181:2181'
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    networks:
+      - myNetwork
 
-  # produces container builds the producer image
-  # and produces message to the queue
+  kafka:
+    image: 'bitnami/kafka:latest'
+    user: root
+    ports:
+      - '9092:9092'
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_LISTENERS=PLAINTEXT://:9092
+      # - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:9092
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    networks:
+      - myNetwork
+    depends_on:
+      - zookeeper
+
+
   producer:
-    build: producer
+    image: kafka-producer/producer:latest
+    build:
+      context: ./producer
+      # dockerfile: producer/Dockerfile
+    ports:
+      - "8282:80"
     depends_on:
-        - rabbit_mq
-    environment:
-        AMQP_URL: 'amqp://rabbit_mq?connection_attempts=10&retry_delay=10'
-    volumes:
-      - ./producer:/usr/src/app/producer
-      - ./mq_connector.py:/usr/src/app/producer/mq_connector.py
+      - kafka
+    networks:
+      - myNetwork
 
-  # consumer container builds the consumer image
-  consumer1:
-    build: consumer
+  consumer:
+    image: peterc/kafka-flask-consumer-example:latest
+    build:
+      context: ./consumer
+    ports:
+      - "8283:80"
     depends_on:
-        - rabbit_mq
-    environment:
-        AMQP_URL: 'amqp://rabbit_mq?connection_attempts=10&retry_delay=10'
-    volumes:
-      - ./consumer:/usr/src/app/consumer
-      - ./mq_connector.py:/usr/src/app/consumer/mq_connector.py
+      - kafka
+    networks:
+      - myNetwork
 
-
-volumes:
-    rabbit_mqdata:
-      driver: local
+# consumer:
+#     build: consumer
+#     image: kafka-consumer/consumer:latest
+#     environment:
+#       - "SPRING_PROFILES_ACTIVE=${ACTIVE_PROFILE}"
+#     ports:
+#       - "8080:8080"
+#     depends_on:
+#       - kafka
